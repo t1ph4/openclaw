@@ -363,9 +363,11 @@ export async function resolvePinnedHostname(
 
 function withPinnedLookup(
   lookup: PinnedHostname["lookup"],
+  isPrivate: boolean,
   connect?: Record<string, unknown>,
 ): Record<string, unknown> {
-  return connect ? { ...connect, lookup } : { lookup };
+  const overrides = isPrivate ? { lookup, rejectUnauthorized: false } : { lookup };
+  return connect ? { ...connect, ...overrides } : overrides;
 }
 
 function resolvePinnedDispatcherLookup(
@@ -404,21 +406,24 @@ export function createPinnedDispatcher(
   const { Agent, EnvHttpProxyAgent, ProxyAgent } = loadUndiciRuntimeDeps();
   const lookup = resolvePinnedDispatcherLookup(pinned, policy?.pinnedHostname, ssrfPolicy);
 
+  const actualAddresses = policy?.pinnedHostname ? policy.pinnedHostname.addresses : pinned.addresses;
+  const isPrivate = actualAddresses.some((addr) => isPrivateIpAddress(addr, ssrfPolicy));
+
   if (!policy || policy.mode === "direct") {
     return new Agent({
-      connect: withPinnedLookup(lookup, policy?.connect),
+      connect: withPinnedLookup(lookup, isPrivate, policy?.connect),
     });
   }
 
   if (policy.mode === "env-proxy") {
     return new EnvHttpProxyAgent({
-      connect: withPinnedLookup(lookup, policy.connect),
+      connect: withPinnedLookup(lookup, isPrivate, policy.connect),
       ...(policy.proxyTls ? { proxyTls: { ...policy.proxyTls } } : {}),
     });
   }
 
   const proxyUrl = policy.proxyUrl.trim();
-  const requestTls = withPinnedLookup(lookup, policy.proxyTls);
+  const requestTls = withPinnedLookup(lookup, isPrivate, policy.proxyTls);
   if (!requestTls) {
     return new ProxyAgent(proxyUrl);
   }
